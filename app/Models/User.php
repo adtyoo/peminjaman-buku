@@ -15,10 +15,19 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'otp',              // tambahkan ini
+        'otp_expired_at',   // tambahkan ini
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
+        'otp',              // sembunyikan OTP
+    ];
+
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+        'otp_expired_at' => 'datetime',
     ];
 }
+
