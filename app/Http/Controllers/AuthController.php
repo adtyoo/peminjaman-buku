@@ -12,14 +12,26 @@ use Illuminate\Support\Facades\Auth;
 class AuthController extends Controller
 {
     /**
-     * PROSES REGISTER (WEB)
+     * =========================
+     * TAMBAH USER (OLEH ADMIN)
+     * =========================
      */
-    public function registerWeb(Request $request)
+    public function storeUser(Request $request)
     {
+        // hanya admin yang boleh
+        if (!Auth::check() || Auth::user()->role !== 'admin') {
+            abort(403, 'Akses ditolak');
+        }
+
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|unique:users',
             'password' => 'required|string|min:6|confirmed',
+
+            // khusus siswa
+            'kelas' => 'required|string',
+            'jurusan' => 'required|string',
+            'nipd' => 'required|string|unique:users,nipd',
         ], [
             'name.required' => 'Nama wajib diisi.',
             'email.required' => 'Email wajib diisi.',
@@ -28,6 +40,10 @@ class AuthController extends Controller
             'password.required' => 'Password wajib diisi.',
             'password.min' => 'Password minimal 6 karakter.',
             'password.confirmed' => 'Konfirmasi password tidak cocok.',
+            'kelas.required' => 'Kelas wajib diisi.',
+            'jurusan.required' => 'Jurusan wajib diisi.',
+            'nipd.required' => 'NIPD wajib diisi.',
+            'nipd.unique' => 'NIPD sudah digunakan.',
         ]);
 
         User::create([
@@ -35,13 +51,20 @@ class AuthController extends Controller
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'role' => 'user',
+
+            // data siswa
+            'kelas' => $request->kelas,
+            'jurusan' => $request->jurusan,
+            'nipd' => $request->nipd,
         ]);
 
-        return redirect('/login')->with('success', 'Registrasi berhasil, silakan login.');
+        return redirect()->back()->with('success', 'Siswa berhasil ditambahkan.');
     }
 
     /**
-     * PROSES LOGIN (WEB)
+     * =========================
+     * LOGIN (WEB)
+     * =========================
      */
     public function loginWeb(Request $request)
     {
@@ -52,7 +75,14 @@ class AuthController extends Controller
 
         if (Auth::attempt($credentials)) {
             $request->session()->regenerate();
-            return redirect('/dashboard');
+
+            $user = Auth::user();
+
+            if ($user->role === 'admin') {
+                return redirect('/admin/dashboard');
+            }
+
+            return redirect('/user/dashboard');
         }
 
         return back()->withErrors([
@@ -60,13 +90,21 @@ class AuthController extends Controller
         ]);
     }
 
-    // FORM LUPA PASSWORD
+    /**
+     * =========================
+     * FORM LUPA PASSWORD
+     * =========================
+     */
     public function showForgotPasswordForm()
     {
         return view('auth.forgot_password');
     }
 
-    // KIRIM OTP KE EMAIL
+    /**
+     * =========================
+     * KIRIM OTP
+     * =========================
+     */
     public function sendOtp(Request $request)
     {
         $request->validate([
@@ -77,7 +115,7 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->email)->first();
 
-        // Generate OTP 6 digit
+        // generate OTP
         $otp = rand(100000, 999999);
 
         $user->update([
@@ -85,24 +123,33 @@ class AuthController extends Controller
             'otp_expired_at' => Carbon::now()->addMinutes(10),
         ]);
 
-        // Kirim email OTP
+        // kirim email
         Mail::raw("Kode verifikasi reset password Anda: $otp", function ($message) use ($user) {
             $message->to($user->email)
                     ->subject('Kode OTP Reset Password');
         });
 
-        return redirect()->route('reset.password.form')->with('email', $user->email)
-                         ->with('success', 'Kode OTP sudah dikirim ke email Anda.');
+        return redirect()->route('reset.password.form')
+            ->with('email', $user->email)
+            ->with('success', 'Kode OTP sudah dikirim ke email Anda.');
     }
 
-    // FORM RESET PASSWORD + OTP
+    /**
+     * =========================
+     * FORM RESET PASSWORD
+     * =========================
+     */
     public function showResetPasswordForm(Request $request)
     {
-        $email = session('email'); // email dari step sebelumnya
+        $email = session('email');
         return view('auth.reset-password', compact('email'));
     }
 
-    // VERIFIKASI OTP & RESET PASSWORD
+    /**
+     * =========================
+     * VERIFIKASI OTP & RESET
+     * =========================
+     */
     public function verifyOtpAndResetPassword(Request $request)
     {
         $request->validate([
@@ -113,7 +160,7 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->email)->first();
 
-        if (!$user || $user->otp !== $request->otp) {
+        if (!$user || $user->otp != $request->otp) {
             return back()->withErrors(['otp' => 'Kode OTP salah.']);
         }
 
@@ -121,9 +168,9 @@ class AuthController extends Controller
             return back()->withErrors(['otp' => 'Kode OTP sudah kadaluarsa.']);
         }
 
-        // Reset password
+        // reset password
         $user->update([
-            'password' => bcrypt($request->password),
+            'password' => Hash::make($request->password),
             'otp' => null,
             'otp_expired_at' => null,
         ]);
@@ -132,7 +179,9 @@ class AuthController extends Controller
     }
 
     /**
-     * LOGOUT (WEB)
+     * =========================
+     * LOGOUT
+     * =========================
      */
     public function logout(Request $request)
     {

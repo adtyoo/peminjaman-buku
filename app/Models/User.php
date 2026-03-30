@@ -15,19 +15,33 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
-        'otp',              // tambahkan ini
-        'otp_expired_at',   // tambahkan ini
+        'kelas',
+        'jurusan',
+        'nipd',
+        'otp',              
+        'otp_expired_at',   
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
-        'otp',              // sembunyikan OTP
+        'otp',              
     ];
 
     protected $casts = [
         'email_verified_at' => 'datetime',
         'otp_expired_at' => 'datetime',
     ];
+
+    public function borrowings()
+    {
+        return $this->hasMany(Borrowing::class);
+    }
+
+    public function processedReturns()
+    {
+        return $this->hasMany(ReturnModel::class, 'processed_by');
+    }
+
 }
 
