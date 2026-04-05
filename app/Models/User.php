@@ -12,25 +12,20 @@ class User extends Authenticatable
 
     protected $fillable = [
         'name',
-        'email',
+        'username',
         'password',
         'role',
         'kelas',
         'jurusan',
-        'nipd',
-        'otp',              
-        'otp_expired_at',   
+        'nisn',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
-        'otp',              
     ];
 
     protected $casts = [
-        'email_verified_at' => 'datetime',
-        'otp_expired_at' => 'datetime',
     ];
 
     public function borrowings()
@@ -42,6 +37,4 @@ class User extends Authenticatable
     {
         return $this->hasMany(ReturnModel::class, 'processed_by');
     }
-
 }
-

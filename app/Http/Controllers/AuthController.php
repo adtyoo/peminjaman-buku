@@ -3,11 +3,12 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
+use App\Models\Classes;
+use App\Models\Major;
 
 class AuthController extends Controller
 {
@@ -18,164 +19,116 @@ class AuthController extends Controller
      */
     public function storeUser(Request $request)
     {
-        // hanya admin yang boleh
         if (!Auth::check() || Auth::user()->role !== 'admin') {
             abort(403, 'Akses ditolak');
         }
 
         $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|unique:users',
             'password' => 'required|string|min:6|confirmed',
 
-            // khusus siswa
-            'kelas' => 'required|string',
-            'jurusan' => 'required|string',
-            'nipd' => 'required|string|unique:users,nipd',
-        ], [
-            'name.required' => 'Nama wajib diisi.',
-            'email.required' => 'Email wajib diisi.',
-            'email.email' => 'Format email tidak valid.',
-            'email.unique' => 'Email sudah digunakan.',
-            'password.required' => 'Password wajib diisi.',
-            'password.min' => 'Password minimal 6 karakter.',
-            'password.confirmed' => 'Konfirmasi password tidak cocok.',
-            'kelas.required' => 'Kelas wajib diisi.',
-            'jurusan.required' => 'Jurusan wajib diisi.',
-            'nipd.required' => 'NIPD wajib diisi.',
-            'nipd.unique' => 'NIPD sudah digunakan.',
+            'kelas' => 'required|exists:classes,name',
+            'jurusan' => 'required|exists:majors,name',
+            'nisn' => 'required|string|unique:users,nisn',
         ]);
 
         User::create([
             'name' => $request->name,
-            'email' => $request->email,
             'password' => Hash::make($request->password),
             'role' => 'user',
 
-            // data siswa
             'kelas' => $request->kelas,
             'jurusan' => $request->jurusan,
-            'nipd' => $request->nipd,
+            'nisn' => $request->nisn,
         ]);
 
-        return redirect()->back()->with('success', 'Siswa berhasil ditambahkan.');
+        return redirect()->route('users.index')
+            ->with('success', 'Siswa berhasil ditambahkan.');
+    }
+
+    public function create()
+    {
+        $classes = Classes::all();
+        $majors = Major::all();
+
+        return view('users.create', compact('classes', 'majors'));
     }
 
     /**
      * =========================
-     * LOGIN (WEB)
+     * LOGIN (USERNAME / NISN)
      * =========================
      */
     public function loginWeb(Request $request)
     {
-        $credentials = $request->validate([
-            'email' => 'required|email',
+        $request->validate([
+            'login' => 'required',
             'password' => 'required',
         ]);
 
-        if (Auth::attempt($credentials)) {
+        // 1. Coba login sebagai ADMIN (pakai username)
+        $adminLogin = Auth::attempt([
+            'username' => $request->login,
+            'password' => $request->password,
+            'role' => 'admin'
+        ]);
+
+        if ($adminLogin) {
             $request->session()->regenerate();
+            return redirect('/admin/dashboard');
+        }
 
-            $user = Auth::user();
+        // 2. Coba login sebagai SISWA (pakai NISN)
+        $userLogin = Auth::attempt([
+            'nisn' => $request->login,
+            'password' => $request->password,
+            'role' => 'user'
+        ]);
 
-            if ($user->role === 'admin') {
-                return redirect('/admin/dashboard');
-            }
-
+        if ($userLogin) {
+            $request->session()->regenerate();
             return redirect('/user/dashboard');
         }
 
+        // 3. Kalau gagal semua
         return back()->withErrors([
-            'email' => 'Email atau password salah.',
-        ]);
+            'login' => 'Login gagal! Periksa username / NISN dan password.',
+        ])->withInput();
     }
 
     /**
      * =========================
-     * FORM LUPA PASSWORD
+     * RESET PASSWORD TANPA EMAIL
      * =========================
      */
-    public function showForgotPasswordForm()
+    public function showResetPasswordForm()
     {
-        return view('auth.forgot_password');
+        return view('auth.reset-password');
     }
 
-    /**
-     * =========================
-     * KIRIM OTP
-     * =========================
-     */
-    public function sendOtp(Request $request)
+    public function resetPassword(Request $request)
     {
         $request->validate([
-            'email' => 'required|email|exists:users,email',
-        ], [
-            'email.exists' => 'Email tidak ditemukan.',
-        ]);
-
-        $user = User::where('email', $request->email)->first();
-
-        // generate OTP
-        $otp = rand(100000, 999999);
-
-        $user->update([
-            'otp' => $otp,
-            'otp_expired_at' => Carbon::now()->addMinutes(10),
-        ]);
-
-        // kirim email
-        Mail::raw("Kode verifikasi reset password Anda: $otp", function ($message) use ($user) {
-            $message->to($user->email)
-                    ->subject('Kode OTP Reset Password');
-        });
-
-        return redirect()->route('reset.password.form')
-            ->with('email', $user->email)
-            ->with('success', 'Kode OTP sudah dikirim ke email Anda.');
-    }
-
-    /**
-     * =========================
-     * FORM RESET PASSWORD
-     * =========================
-     */
-    public function showResetPasswordForm(Request $request)
-    {
-        $email = session('email');
-        return view('auth.reset-password', compact('email'));
-    }
-
-    /**
-     * =========================
-     * VERIFIKASI OTP & RESET
-     * =========================
-     */
-    public function verifyOtpAndResetPassword(Request $request)
-    {
-        $request->validate([
-            'email' => 'required|email|exists:users,email',
-            'otp' => 'required|digits:6',
+            'login' => 'required', // username / nisn
             'password' => 'required|string|min:6|confirmed',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        $field = is_numeric($request->login) ? 'nisn' : 'username';
 
-        if (!$user || $user->otp != $request->otp) {
-            return back()->withErrors(['otp' => 'Kode OTP salah.']);
+        $user = User::where($field, $request->login)->first();
+
+        if (!$user) {
+            return back()->withErrors([
+                'login' => 'User tidak ditemukan.'
+            ]);
         }
 
-        if (Carbon::now()->gt($user->otp_expired_at)) {
-            return back()->withErrors(['otp' => 'Kode OTP sudah kadaluarsa.']);
-        }
-
-        // reset password
         $user->update([
-            'password' => Hash::make($request->password),
-            'otp' => null,
-            'otp_expired_at' => null,
+            'password' => Hash::make($request->password)
         ]);
 
-        return redirect('/login')->with('success', 'Password berhasil diubah, silakan login.');
+        return redirect()->route('login')
+            ->with('success', 'Password berhasil diubah.');
     }
 
     /**
@@ -185,11 +138,12 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        Auth::logout();
+        Auth::guard('web')->logout();
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return redirect('/login');
+        return redirect()->route('login')
+            ->with('success', 'Berhasil logout');
     }
 }

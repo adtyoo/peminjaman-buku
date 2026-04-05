@@ -10,8 +10,15 @@ class Category extends Model
         'name'
     ];
 
+    // Relasi ke Buku
     public function books()
     {
         return $this->hasMany(Book::class);
+    }
+
+    // 🔥 Relasi ke Subkategori
+    public function subcategories()
+    {
+        return $this->hasMany(Subcategory::class);
     }
 }
